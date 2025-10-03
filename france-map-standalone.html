@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Carte France - SAGEO (Standalone)</title>
+  <script src="https://gristlabs.github.io/grist-widget/grist-plugin-api.js"></script>
+  <style>
+    html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    #wrap { height: 100%; display: grid; place-items: center; background:#f6f7fb; }
+    #frame { width: 100%; max-width: 980px; aspect-ratio: 16/11; background: white; border-radius: 16px; box-shadow: 0 6px 18px rgba(0,0,0,0.06); padding: 12px; position: relative; }
+    #mapHolder { width: 100%; height: 100%; display:flex; align-items:center; justify-content:center; color:#6b7a90; }
+    svg { width: 100%; height: 100%; }
+    .badge { cursor: default; }
+    .badge rect { rx: 8; ry: 8; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15)); }
+    .badge text { font-size: 12px; font-weight: 600; fill: #fff; text-anchor: middle; dominant-baseline: central; }
+    .subtitle { position:absolute; top:10px; left:12px; color:#5c6b80; font-size:12px; }
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <div id="frame">
+    <div class="subtitle">Carte interactive (positions X/Y en % — colonnes: x,y,name,pct,label)</div>
+    <div id="mapHolder">Chargement de la carte…</div>
+  </div>
+</div>
+
+<script>
+const SVG_URL = "https://simplemaps.com/static/svg/country/fr/admin1/fr.svg";
+const state = { svgEl: null, viewBox: null, records: [] };
+
+function colorFor(pct) {
+  if (Number(pct) >= 0.80) return "#2e7d32";
+  if (Number(pct) >= 0.65) return "#f39c12";
+  return "#c0392b";
+}
+
+async function loadSvgOnce() {
+  if (state.svgEl) return;
+  try {
+    const res = await fetch(SVG_URL);
+    if (!res.ok) throw new Error("HTTP " + res.status + " " + res.statusText);
+    const text = await res.text();
+    const holder = document.getElementById('mapHolder');
+    holder.innerHTML = text;
+    state.svgEl = holder.querySelector('svg');
+    if (!state.svgEl) throw new Error("SVG introuvable dans la réponse.");
+    let vb = state.svgEl.getAttribute('viewBox');
+    if (!vb) {
+      const w = parseFloat(state.svgEl.getAttribute('width') || 1000);
+      const h = parseFloat(state.svgEl.getAttribute('height') || 1000);
+      vb = `0 0 ${w} ${h}`;
+      state.svgEl.setAttribute('viewBox', vb);
+    }
+    const [x, y, w, h] = state.svgEl.getAttribute('viewBox').split(/\s+/).map(Number);
+    state.viewBox = {x, y, w, h};
+    renderBadges();
+  } catch (e) {
+    const holder = document.getElementById('mapHolder');
+    holder.innerHTML = "<div style='padding:12px;color:#b00020;font:14px/1.4 system-ui'>"
+      + "Échec du chargement du SVG. " + (e.message || e)
+      + "<br>Astuce : héberge le fichier <code>fr.svg</code> avec cette page et remplace <code>SVG_URL</code> par <code>./fr.svg</code>."
+      + "</div>";
+    console.error(e);
+  }
+}
+
+function clearBadges() {
+  state.svgEl?.querySelectorAll('g.__labels__').forEach(g => g.remove());
+}
+
+function renderBadges() {
+  if (!state.svgEl || !state.viewBox) return;
+  clearBadges();
+  const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  g.setAttribute("class", "__labels__");
+  state.svgEl.appendChild(g);
+
+  const {w, h} = state.viewBox;
+  for (const r of state.records) {
+    const xPct = Number(r.x);
+    const yPct = Number(r.y);
+    if (!isFinite(xPct) || !isFinite(yPct)) continue;
+
+    const cx = (xPct/100) * w;
+    const cy = (yPct/100) * h;
+    const label = r.label || (r.name ?? "");
+    const pct = Number(r.pct ?? 0);
+
+    const badge = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    badge.setAttribute("class", "badge");
+    badge.setAttribute("transform", `translate(${cx}, ${cy})`);
+
+    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    rect.setAttribute("x", -58);
+    rect.setAttribute("y", -18);
+    rect.setAttribute("width", 116);
+    rect.setAttribute("height", 36);
+    rect.setAttribute("fill", colorFor(pct));
+    badge.appendChild(rect);
+
+    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    text.setAttribute("x", 0);
+    text.setAttribute("y", 0);
+    text.textContent = label;
+    badge.appendChild(text);
+
+    g.appendChild(badge);
+  }
+}
+
+loadSvgOnce();
+
+grist.ready({ requiredAccess: 'read table' });
+grist.onRecords(async (table) => {
+  state.records = (table.records || []).map(r => ({
+    id: r.id,
+    x: r.x, y: r.y, name: r.name, disp: r.disp,
+    pct: r.pct, label: r.label
+  }));
+  renderBadges();
+});
+</script>
+</body>
+</html>
